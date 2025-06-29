@@ -1,0 +1,12 @@
+# Audio Transcription Dependencies
+openai-whisper>=20231117
+pydub>=0.25.1
+watchdog>=3.0.0
+PyYAML>=6.0.1
+click>=8.1.7
+tqdm>=4.66.1
+python-dotenv>=1.0.0
+ffmpeg-python>=0.2.0
+numpy>=1.24.0
+torch>=2.0.0
+torchaudio>=2.0.0 

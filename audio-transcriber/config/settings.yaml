@@ -1,0 +1,76 @@
+# Audio Transcriber Configuration
+
+# iCloud Drive Paths
+icloud:
+  # Default iCloud Drive path on macOS
+  base_path: "~/Library/Mobile Documents/com~apple~CloudDocs"
+  # Source directory for audio files (relative to base_path)
+  audio_source: "Audio Files"
+  # Destination directory for transcripts (relative to base_path)
+  transcript_dest: "Transcripts"
+
+# Audio Processing
+audio:
+  # Supported audio file extensions
+  supported_formats:
+    - ".mp3"
+    - ".m4a"
+    - ".wav"
+    - ".flac"
+    - ".aac"
+    - ".mov"
+    - ".m4v"
+    - ".aiff"
+    - ".aif"
+  # Maximum file size to process (in MB)
+  max_file_size_mb: 500
+  # Audio preprocessing settings
+  preprocessing:
+    # Target sample rate for Whisper
+    target_sample_rate: 16000
+    # Convert to mono if stereo
+    convert_to_mono: true
+    # Normalize audio levels
+    normalize: true
+
+# Transcription Settings
+transcription:
+  # Whisper model size (tiny, base, small, medium, large)
+  model_size: "base"
+  # Language code (auto for auto-detection)
+  language: "auto"
+  # Include timestamps in output
+  include_timestamps: false
+  # Output format (txt, json, srt)
+  output_format: "txt"
+  # Task type (transcribe or translate)
+  task: "transcribe"
+
+# File Monitoring
+monitoring:
+  # Enable real-time file monitoring
+  enabled: true
+  # Check for new files every N seconds (if monitoring disabled)
+  check_interval: 60
+  # Process files in batches
+  batch_size: 5
+  # Skip files that already have transcripts
+  skip_existing: true
+
+# Logging
+logging:
+  # Log level (DEBUG, INFO, WARNING, ERROR)
+  level: "INFO"
+  # Log file path
+  file: "transcriber.log"
+  # Include timestamps in logs
+  include_timestamps: true
+
+# Performance
+performance:
+  # Number of concurrent transcription jobs
+  max_concurrent: 2
+  # Use GPU if available
+  use_gpu: true
+  # Memory limit for processing (in MB)
+  memory_limit_mb: 2048 
