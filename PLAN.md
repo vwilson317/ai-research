@@ -20,6 +20,70 @@ The project has a **local Python transcription service** in `audio-transcriber/`
 - **Architecture**: Modular design with configurable settings
 - **Status**: Working local implementation with iCloud integration
 
+### Docker Setup ✅
+The frontend now has **complete Docker configuration**:
+- **Production**: Multi-stage build with Nginx serving
+- **Development**: Hot reloading with volume mounting
+- **Documentation**: Comprehensive setup instructions
+- **Status**: Ready for local development and deployment
+
+## Frontend-Backend Integration Tasks (Current Priority)
+
+### Task 1: API Service Layer Implementation
+- [ ] **Create API service functions** in `src/services/`
+  - [ ] Replace mock transcription service with real API calls
+  - [ ] Implement file upload service with progress tracking
+  - [ ] Add job status polling service
+  - [ ] Create error handling and retry logic
+- [ ] **Configure API base URL** and environment variables
+- [ ] **Add request/response TypeScript interfaces**
+- [ ] **Implement authentication headers** for API calls
+
+### Task 2: Backend API Development
+- [ ] **Convert existing Python backend** to FastAPI
+  - [ ] Create FastAPI application structure
+  - [ ] Implement file upload endpoints
+  - [ ] Add transcription job management
+  - [ ] Integrate with existing Whisper logic
+- [ ] **Add CORS configuration** for frontend integration
+- [ ] **Implement proper error handling** and status codes
+- [ ] **Add request validation** and response models
+
+### Task 3: Real-time Communication
+- [ ] **Implement WebSocket connection** for live updates
+  - [ ] Add WebSocket server to backend
+  - [ ] Create WebSocket client in frontend
+  - [ ] Handle connection state management
+- [ ] **Add polling fallback** for WebSocket failures
+- [ ] **Implement progress updates** for transcription jobs
+- [ ] **Add job status notifications**
+
+### Task 4: File Upload Integration
+- [ ] **Replace mock upload** with real file handling
+  - [ ] Implement multipart file upload
+  - [ ] Add file validation (size, type, format)
+  - [ ] Create upload progress tracking
+  - [ ] Handle upload errors and retries
+- [ ] **Add file preview** for uploaded audio
+- [ ] **Implement file management** (delete, rename)
+
+### Task 5: Error Handling and UX
+- [ ] **Add comprehensive error handling**
+  - [ ] Network error states
+  - [ ] API error responses
+  - [ ] File upload failures
+  - [ ] Transcription errors
+- [ ] **Implement loading states** and spinners
+- [ ] **Add retry mechanisms** for failed operations
+- [ ] **Create user-friendly error messages**
+
+### Task 6: Testing and Validation
+- [ ] **Test API integration** end-to-end
+- [ ] **Validate file upload** with various formats
+- [ ] **Test error scenarios** and edge cases
+- [ ] **Performance testing** with large files
+- [ ] **Cross-browser compatibility** testing
+
 ## AWS Architecture (Cost-Optimized)
 
 ### 1. System Components

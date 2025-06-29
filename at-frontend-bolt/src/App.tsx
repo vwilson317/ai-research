@@ -3,6 +3,7 @@ import { AudioUploader } from './components/AudioUploader';
 import { TranscriptionProgress } from './components/TranscriptionProgress';
 import { TranscriptEditor } from './components/TranscriptEditor';
 import { GroupManager } from './components/GroupManager';
+import ApiTest from './components/ApiTest';
 import { useAudioFile } from './hooks/useAudioFile';
 import { useTranscription } from './hooks/useTranscription';
 import { useTranscriptionGroups } from './hooks/useTranscriptionGroups';
@@ -21,7 +22,7 @@ function App() {
     removeJobFromGroup 
   } = useTranscriptionGroups();
   const [selectedJob, setSelectedJob] = useState<TranscriptionJob | null>(null);
-  const [activeTab, setActiveTab] = useState<'transcribe' | 'groups'>('transcribe');
+  const [activeTab, setActiveTab] = useState<'transcribe' | 'groups' | 'api-test'>('api-test');
 
   const handleFilesSelected = (files: AudioFile[], groupId?: string) => {
     // Auto-start transcription for newly uploaded files
@@ -97,6 +98,19 @@ function App() {
           <div className="mt-6 border-b border-gray-200">
             <nav className="-mb-px flex space-x-8">
               <button
+                onClick={() => setActiveTab('api-test')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'api-test'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center space-x-2">
+                  <Zap className="w-4 h-4" />
+                  <span>API Test</span>
+                </div>
+              </button>
+              <button
                 onClick={() => setActiveTab('transcribe')}
                 className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'transcribe'
@@ -128,7 +142,9 @@ function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'transcribe' ? (
+        {activeTab === 'api-test' ? (
+          <ApiTest />
+        ) : activeTab === 'transcribe' ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Left Column - Upload & Progress */}
             <div className="space-y-8">
@@ -206,18 +222,15 @@ function App() {
             </div>
           </div>
         ) : (
-          /* Groups Tab */
-          <div className="max-w-4xl mx-auto">
-            <GroupManager
-              groups={groups}
-              jobs={jobs}
-              onCreateGroup={handleCreateGroup}
-              onUpdateGroup={updateGroup}
-              onDeleteGroup={deleteGroup}
-              onAddJobToGroup={handleAddJobToGroup}
-              onRemoveJobFromGroup={handleRemoveJobFromGroup}
-            />
-          </div>
+          <GroupManager
+            groups={groups}
+            jobs={jobs}
+            onCreateGroup={createGroup}
+            onUpdateGroup={updateGroup}
+            onDeleteGroup={deleteGroup}
+            onAddJobToGroup={addJobToGroup}
+            onRemoveJobFromGroup={removeJobFromGroup}
+          />
         )}
 
         {/* Loading Overlay */}

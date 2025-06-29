@@ -1,9 +1,11 @@
 import { TranscriptionJob, TranscriptionOptions } from '../types';
+import { apiService } from './apiService';
 
-// Mock transcription service - replace with actual API integration
+// Real transcription service using API integration
 export class TranscriptionService {
   private static instance: TranscriptionService;
   private jobs: Map<string, TranscriptionJob> = new Map();
+  private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
 
   static getInstance(): TranscriptionService {
     if (!TranscriptionService.instance) {
@@ -16,89 +18,151 @@ export class TranscriptionService {
     job: TranscriptionJob,
     options: TranscriptionOptions = {}
   ): Promise<void> {
-    this.jobs.set(job.id, { ...job, status: 'processing', progress: 0 });
-
-    // Simulate transcription progress
-    return this.simulateTranscription(job.id);
-  }
-
-  private async simulateTranscription(jobId: string): Promise<void> {
-    const job = this.jobs.get(jobId);
-    if (!job) return;
-
-    // Simulate progress updates
-    for (let progress = 0; progress <= 100; progress += 10) {
-      await new Promise(resolve => setTimeout(resolve, 200));
+    try {
+      // First upload the file
+      const uploadResponse = await apiService.uploadFile(job.audioFile.file);
       
-      const updatedJob = this.jobs.get(jobId);
-      if (updatedJob) {
-        this.jobs.set(jobId, { ...updatedJob, progress });
+      // Then start transcription
+      const transcriptionResponse = await apiService.startTranscription(
+        uploadResponse.file_id,
+        options
+      );
+
+      // Update job with real IDs
+      const updatedJob: TranscriptionJob = {
+        ...job,
+        id: transcriptionResponse.job_id,
+        audioFile: {
+          ...job.audioFile,
+          id: uploadResponse.file_id,
+        },
+        status: 'processing',
+        progress: 0,
+      };
+
+      this.jobs.set(updatedJob.id, updatedJob);
+
+      // Start polling for status updates
+      this.startPolling(updatedJob.id);
+
+    } catch (error) {
+      console.error('Failed to start transcription:', error);
+      const errorJob = {
+        ...job,
+        status: 'error' as const,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+      this.jobs.set(job.id, errorJob);
+      throw error;
+    }
+  }
+
+  private async startPolling(jobId: string): Promise<void> {
+    // Clear any existing polling
+    this.stopPolling(jobId);
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const apiJob = await apiService.getJobStatus(jobId);
+        const updatedJob = apiService.convertJobResponse(apiJob);
+        
+        this.jobs.set(jobId, updatedJob);
+
+        // Stop polling if job is completed or failed
+        if (updatedJob.status === 'completed' || updatedJob.status === 'error') {
+          this.stopPolling(jobId);
+        }
+      } catch (error) {
+        console.error('Failed to poll job status:', error);
+        // Continue polling on error, but maybe add exponential backoff
       }
-    }
+    }, 2000); // Poll every 2 seconds
 
-    // Simulate completion with mock transcript
-    const completedJob = this.jobs.get(jobId);
-    if (completedJob) {
-      const mockTranscript = this.generateMockTranscript(completedJob.audioFile.name);
-      this.jobs.set(jobId, {
-        ...completedJob,
-        status: 'completed',
-        progress: 100,
-        transcript: mockTranscript,
-        completedAt: new Date()
+    this.pollingIntervals.set(jobId, pollInterval);
+  }
+
+  private stopPolling(jobId: string): void {
+    const interval = this.pollingIntervals.get(jobId);
+    if (interval) {
+      clearInterval(interval);
+      this.pollingIntervals.delete(jobId);
+    }
+  }
+
+  async getJob(jobId: string): Promise<TranscriptionJob | undefined> {
+    try {
+      const apiJob = await apiService.getJobStatus(jobId);
+      const job = apiService.convertJobResponse(apiJob);
+      this.jobs.set(jobId, job);
+      return job;
+    } catch (error) {
+      console.error('Failed to get job:', error);
+      return this.jobs.get(jobId);
+    }
+  }
+
+  async getAllJobs(): Promise<TranscriptionJob[]> {
+    try {
+      const apiJobs = await apiService.getAllJobs();
+      const jobs = apiJobs.map(apiJob => apiService.convertJobResponse(apiJob));
+      
+      // Update local cache
+      jobs.forEach(job => {
+        this.jobs.set(job.id, job);
       });
+
+      return jobs.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    } catch (error) {
+      console.error('Failed to get all jobs:', error);
+      // Return cached jobs if API fails
+      return Array.from(this.jobs.values()).sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+      );
     }
   }
 
-  private generateMockTranscript(filename: string): string {
-    return `This is a sample transcription for the audio file "${filename}".
-
-In a real implementation, this would be replaced with actual transcription results from services like:
-
-• OpenAI Whisper API
-• Google Speech-to-Text
-• Azure Cognitive Services Speech
-• AWS Transcribe
-
-The transcription would include the actual spoken content from your audio file, with proper punctuation, paragraph breaks, and formatting.
-
-For production use, you would:
-1. Upload the audio file to the chosen transcription service
-2. Poll for completion status
-3. Retrieve the completed transcript
-4. Format and present it to the user
-
-This sample transcript demonstrates how the final result would appear in the interface, ready for editing and export to your iCloud Drive for access on your iPhone.`;
+  async updateTranscript(jobId: string, transcript: string): Promise<void> {
+    try {
+      await apiService.updateTranscript(jobId, transcript);
+      
+      // Update local cache
+      const job = this.jobs.get(jobId);
+      if (job) {
+        this.jobs.set(jobId, { ...job, transcript });
+      }
+    } catch (error) {
+      console.error('Failed to update transcript:', error);
+      throw error;
+    }
   }
 
-  getJob(jobId: string): TranscriptionJob | undefined {
-    return this.jobs.get(jobId);
+  async deleteJob(jobId: string): Promise<void> {
+    try {
+      await apiService.deleteJob(jobId);
+      
+      // Remove from local cache and stop polling
+      this.jobs.delete(jobId);
+      this.stopPolling(jobId);
+    } catch (error) {
+      console.error('Failed to delete job:', error);
+      throw error;
+    }
   }
 
-  getAllJobs(): TranscriptionJob[] {
-    return Array.from(this.jobs.values()).sort(
-      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-    );
+  // Cleanup method to stop all polling when component unmounts
+  cleanup(): void {
+    this.pollingIntervals.forEach((interval) => clearInterval(interval));
+    this.pollingIntervals.clear();
   }
 
-  // In a real implementation, integrate with actual transcription APIs:
-  /*
-  async transcribeWithOpenAI(audioFile: File): Promise<string> {
-    const formData = new FormData();
-    formData.append('file', audioFile);
-    formData.append('model', 'whisper-1');
-    formData.append('response_format', 'json');
-
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: formData,
-    });
-
-    const result = await response.json();
-    return result.text;
+  // Health check method
+  async healthCheck(): Promise<boolean> {
+    try {
+      const health = await apiService.healthCheck();
+      return health.status === 'healthy';
+    } catch (error) {
+      console.error('Health check failed:', error);
+      return false;
+    }
   }
-  */
 }
