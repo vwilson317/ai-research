@@ -1,4 +1,4 @@
-import { Beaker, Bot, FlaskConical, KeyRound, ListChecks, PlayCircle } from 'lucide-react';
+import { Beaker, Bot, FlaskConical, KeyRound, Library, ListChecks, PlayCircle } from 'lucide-react';
 import { useHashRoute } from './router';
 import RunsPage from './pages/RunsPage';
 import NewRunPage from './pages/NewRunPage';
@@ -7,11 +7,14 @@ import SuitesPage from './pages/SuitesPage';
 import SuiteEditor from './pages/SuiteEditor';
 import ModelsPage from './pages/ModelsPage';
 import SettingsPage from './pages/SettingsPage';
+import LibraryPage from './pages/LibraryPage';
+import DocView from './pages/DocView';
 
 const NAV = [
   { href: '#/runs', key: 'runs', label: 'Runs', icon: FlaskConical },
   { href: '#/new', key: 'new', label: 'New run', icon: PlayCircle },
   { href: '#/suites', key: 'suites', label: 'Eval suites', icon: ListChecks },
+  { href: '#/library', key: 'library', label: 'Library', icon: Library },
   { href: '#/models', key: 'models', label: 'Models', icon: Bot },
   { href: '#/settings', key: 'settings', label: 'API keys', icon: KeyRound },
 ];
@@ -23,6 +26,8 @@ export default function App() {
   else if (section === 'new') page = <NewRunPage />;
   else if (section === 'suites' && id) page = <SuiteEditor id={id} />;
   else if (section === 'suites') page = <SuitesPage />;
+  else if (section === 'library' && id) page = <DocView id={id} />;
+  else if (section === 'library') page = <LibraryPage />;
   else if (section === 'models') page = <ModelsPage />;
   else if (section === 'settings') page = <SettingsPage />;
   else page = <RunsPage />;

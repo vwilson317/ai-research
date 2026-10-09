@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Plus, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Mic, Paperclip, Plus, Trash2, User, X } from 'lucide-react';
 import { api } from '../api';
 import { CHECK_TYPES, CRITERIA_PRESETS } from '../presets';
-import type { AutoCheck, Criterion, Suite, TestCase } from '../types';
+import type { AutoCheck, Criterion, LibraryDocSummary, Suite, SuiteContext, TestCase } from '../types';
 import { Badge, Button, Card, ErrorBox, Field, useAsync } from '../components/ui';
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'criterion';
@@ -72,7 +72,11 @@ function CriterionRow({ c, onChange, onDelete }: { c: Criterion; onChange: (c: C
   );
 }
 
-function CaseRow({ c, index, onChange, onDelete }: { c: TestCase; index: number; onChange: (c: TestCase) => void; onDelete: () => void }) {
+function CaseRow({ c, index, onChange, onDelete, docs, defaultInput }: {
+  c: TestCase; index: number; onChange: (c: TestCase) => void; onDelete: () => void; docs: LibraryDocSummary[]; defaultInput?: string;
+}) {
+  const attached = c.context_doc_ids ?? [];
+  const source = c.source_doc_id ? docs.find((d) => d.id === c.source_doc_id) : null;
   return (
     <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
       <div className="mb-2 flex items-center justify-between">
@@ -92,12 +96,86 @@ function CaseRow({ c, index, onChange, onDelete }: { c: TestCase; index: number;
         </Field>
         <div><span className="label">Automatic checks for this case</span><ChecksEditor checks={c.checks} onChange={(checks) => onChange({ ...c, checks })} /></div>
       </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="label mb-0 flex items-center gap-1"><Paperclip className="h-3.5 w-3.5" /> Attached material:</span>
+        {attached.map((id) => {
+          const d = docs.find((x) => x.id === id);
+          return (
+            <Badge key={id} color={d ? 'indigo' : 'red'}>
+              <a href={`#/library/${id}`}>{d ? d.title : 'missing document'}</a>
+              <button onClick={() => onChange({ ...c, context_doc_ids: attached.filter((x) => x !== id) })}><X className="h-3 w-3" /></button>
+            </Badge>
+          );
+        })}
+        <select className="input w-auto max-w-xs py-0.5 text-xs" value="" onChange={(e) => e.target.value && onChange({
+          ...c, context_doc_ids: [...attached, e.target.value],
+          // attaching an episode to an empty case reuses the suite's instructions (e.g. the summary prompt)
+          input: c.input.trim() ? c.input : (defaultInput ?? ''),
+        })}>
+          <option value="">+ attach transcript / document…</option>
+          {(['podcast', 'document', 'voice_note'] as const).map((k) => (
+            <optgroup key={k} label={k === 'podcast' ? 'Podcasts' : k === 'document' ? 'Documents' : 'Voice notes'}>
+              {docs.filter((d) => d.kind === k && d.status === 'ready' && !attached.includes(d.id)).map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {source && <Badge title="This case's input came from this voice note; it is left out of the voice profile for this case."><Mic className="h-3 w-3" /> from: {source.title}</Badge>}
+      </div>
     </div>
+  );
+}
+
+const DEFAULT_CTX: SuiteContext = { doc_ids: [], role: 'voice', max_chars: 24000, share_with_judge: true };
+
+function ContextCard({ ctx, docs, onChange }: { ctx: SuiteContext; docs: LibraryDocSummary[]; onChange: (c: SuiteContext) => void }) {
+  const [filter, setFilter] = useState('');
+  const notes = docs.filter((d) => d.kind !== 'podcast' && d.status === 'ready');
+  const selected = new Set(ctx.doc_ids);
+  const chars = notes.filter((d) => selected.has(d.id)).reduce((a, d) => a + d.word_count * 6, 0);
+  const shown = notes.filter((d) => !filter || d.title.toLowerCase().includes(filter.toLowerCase()));
+  const toggle = (id: string) => onChange({ ...ctx, doc_ids: selected.has(id) ? ctx.doc_ids.filter((x) => x !== id) : [...ctx.doc_ids, id] });
+  return (
+    <Card title={<span className="flex items-center gap-1.5"><User className="h-4 w-4" /> Personal context <span className="font-normal text-zinc-500">· {ctx.doc_ids.length} selected</span></span>}
+      actions={<a href="#/library" className="text-xs text-indigo-600">Manage library →</a>}>
+      <p className="mb-3 text-sm text-zinc-500">Your voice notes or writing, given to every model (and the judge) as context. As a <b>voice profile</b> they teach the model how you talk. As <b>background</b> they tell it about your life. Newest notes are used first, up to the size budget.</p>
+      <div className="mb-3 grid gap-3 md:grid-cols-3">
+        <Field label="Use as">
+          <select className="input" value={ctx.role} onChange={(e) => onChange({ ...ctx, role: e.target.value as SuiteContext['role'] })}>
+            <option value="voice">Voice profile (match my tone)</option>
+            <option value="background">Background about me</option>
+          </select>
+        </Field>
+        <Field label="Size budget (characters)" hint={`≈ ${Math.round(ctx.max_chars / 4).toLocaleString()} tokens per request · selected ≈ ${chars.toLocaleString()} chars`}>
+          <input className="input" type="number" min={500} step={1000} value={ctx.max_chars} onChange={(e) => onChange({ ...ctx, max_chars: Math.max(500, Number(e.target.value) || 500) })} />
+        </Field>
+        <label className="flex items-center gap-2 pt-5 text-sm"><input type="checkbox" checked={ctx.share_with_judge} onChange={(e) => onChange({ ...ctx, share_with_judge: e.target.checked })} /> Show to the AI judge (needed to grade tone)</label>
+      </div>
+      {notes.length === 0 ? <p className="text-sm text-zinc-500">No voice notes or documents yet. <a className="text-indigo-600" href="#/library">Import your iCloud transcripts →</a></p> : (
+        <>
+          <div className="mb-2 flex flex-wrap gap-2">
+            <input className="input w-48 py-1 text-xs" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <Button variant="ghost" className="text-xs" onClick={() => onChange({ ...ctx, doc_ids: [...new Set([...ctx.doc_ids, ...shown.map((d) => d.id)])] })}>Select all shown</Button>
+            <Button variant="ghost" className="text-xs" onClick={() => onChange({ ...ctx, doc_ids: [] })}>Clear</Button>
+          </div>
+          <div className="max-h-56 space-y-0.5 overflow-y-auto rounded border border-zinc-200 p-1 dark:border-zinc-800">
+            {shown.map((d) => (
+              <label key={d.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
+                <span className="flex-1 truncate">{d.title}</span>
+                <span className="text-xs text-zinc-500">{d.created_at?.slice(0, 10)} · {d.word_count} w</span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 
 export default function SuiteEditor({ id }: { id: string }) {
   const { data, error } = useAsync(() => api.suite(id), [id]);
+  const { data: docs } = useAsync(() => api.library(), []);
+  const [pickNotes, setPickNotes] = useState<string[] | null>(null);
   const [suite, setSuite] = useState<Suite | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -149,6 +227,19 @@ export default function SuiteEditor({ id }: { id: string }) {
     setBulk(null);
   };
 
+  const ctx = suite.context ?? DEFAULT_CTX;
+  const voiceNotes = (docs ?? []).filter((d) => d.kind === 'voice_note' && d.status === 'ready');
+  const casesFromNotes = async (ids: string[]) => {
+    const taken = suite.cases.map((c) => c.id);
+    const added: TestCase[] = [];
+    for (const did of ids) {
+      const d = await api.doc(did);
+      const cid = uniqueId(`vn${taken.length + 1}`, taken); taken.push(cid);
+      added.push({ id: cid, input: d.text, reference: null, tags: ['my-voice-note'], checks: [], context_doc_ids: [], source_doc_id: d.id });
+    }
+    update({ cases: [...suite.cases, ...added] });
+    setPickNotes(null);
+  };
   const unusedPresets = CRITERIA_PRESETS.filter((p) => !suite.criteria.some((c) => c.id === p.id));
   const totalWeight = suite.criteria.reduce((a, c) => a + c.weight, 0);
   const shownCases = suite.cases
@@ -169,6 +260,8 @@ export default function SuiteEditor({ id }: { id: string }) {
           </Field>
         </div>
       </Card>
+
+      <ContextCard ctx={ctx} docs={docs ?? []} onChange={(context) => update({ context })} />
 
       <Card title={<>Scoring criteria <span className="font-normal text-zinc-500">· total weight {totalWeight}</span></>}
         actions={<>
@@ -203,9 +296,27 @@ export default function SuiteEditor({ id }: { id: string }) {
       <Card title={<>Test cases <Badge>{suite.cases.length}</Badge></>}
         actions={<>
           <input className="input w-40 py-1 text-xs" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          {voiceNotes.length > 0 && <Button variant="ghost" onClick={() => setPickNotes([])}><Mic className="h-4 w-4" /> From voice notes</Button>}
           <Button variant="ghost" onClick={() => setBulk('')}>Bulk add</Button>
           <Button variant="ghost" onClick={() => addCases([''])}><Plus className="h-4 w-4" /> Case</Button>
         </>}>
+        {pickNotes !== null && (
+          <div className="mb-3 rounded-md border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900 dark:bg-indigo-950/30">
+            <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">Each selected voice note becomes a test case, with its raw transcript as the input. Notes used as cases are automatically left out of the voice profile for that case, so the model can't copy the answer.</p>
+            <div className="max-h-56 space-y-0.5 overflow-y-auto">
+              {voiceNotes.map((d) => (
+                <label key={d.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={pickNotes.includes(d.id)} onChange={(e) => setPickNotes(e.target.checked ? [...pickNotes, d.id] : pickNotes.filter((x) => x !== d.id))} />
+                  <span className="flex-1 truncate">{d.title}</span><span className="text-xs text-zinc-500">{d.word_count} words</span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-2 flex justify-end gap-2">
+              <Button onClick={() => setPickNotes(null)}>Cancel</Button>
+              <Button variant="primary" disabled={!pickNotes.length} onClick={() => casesFromNotes(pickNotes)}>Add {pickNotes.length} case(s)</Button>
+            </div>
+          </div>
+        )}
         {bulk !== null && (
           <div className="mb-3 rounded-md border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900 dark:bg-indigo-950/30">
             <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">Paste prompts separated by blank lines, or JSONL / a JSON array of <code>{'{"input", "reference", "tags"}'}</code> objects.</p>
@@ -218,7 +329,7 @@ export default function SuiteEditor({ id }: { id: string }) {
         )}
         <div className="space-y-2">
           {shownCases.map(({ c, i }) => (
-            <CaseRow key={i} c={c} index={i}
+            <CaseRow key={i} c={c} index={i} docs={docs ?? []} defaultInput={suite.cases.find((x) => x.input.trim() && x.context_doc_ids?.length)?.input}
               onChange={(nc) => update({ cases: suite.cases.map((x, j) => (j === i ? nc : x)) })}
               onDelete={() => update({ cases: suite.cases.filter((_, j) => j !== i) })} />
           ))}

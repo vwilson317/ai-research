@@ -37,6 +37,37 @@ Use them to try the whole flow without spending any tokens.
 | **7. Reveal** | Unblinds the leaderboard and review screens. You can re-blind afterwards. |
 | **8. AI audit of the eval** | The judge reviews the suite design plus the anonymised results and your disagreements with it. It reports a quality score, issues by severity, vague rubrics (with suggested rewrites), cases that don't discriminate, judge-reliability notes, and suggested new test cases that you can add to the suite in one click. |
 
+## Built-in eval templates
+
+| Suite | What it tests | Key criteria | Auto checks |
+|---|---|---|---|
+| **Polish my writing (keep my voice)** | Fixing grammar and tightening free-flow writing or voice-note transcripts *without* losing your tone | Sounds like me (×3), meaning preserved, grammar, concise-not-compressed, no AI-isms, "I'd send it as-is" (human only) | output ≤ 0.95× and ≥ 0.3× input length, no "Here's…" preamble, no "delve" |
+| **Reflection & advice** | Thinking out loud and asking for advice (therapy-style) | I feel heard, insight, practical next steps, personalised, honest-not-sycophantic, safe & appropriate, "I'd come back" | ≤ 450 words, no "as an AI" |
+| **Podcast summary** | Summarising an episode *and* capturing the back-and-forth between speakers | Faithful (×3), coverage, captures the dialogue, quotes are verbatim, structure, "saves me the listen" | ≤ 700 words, contains a real quote |
+
+The rewrite review screen has a **Show edits vs. input** toggle: a word-level diff with the share of your words that were kept.
+Podcast cases show the attached transcript as a speaker-by-speaker conversation.
+
+## Personal library
+
+**Library → Voice notes.** Point it at the folder your `audio-transcriber` writes to
+(default `~/Library/Mobile Documents/com~apple~CloudDocs/Transcripts`). It imports every `.txt / .json / .srt / .md`
+transcript; re-import any time and only new or changed notes are added. You can also upload or paste notes.
+In Docker, set `VOICE_NOTES_DIR` in `.env` and import from `/voice-notes`.
+
+**Suite → Personal context.** Pick voice notes to give every model (and the judge):
+- **Voice profile:** samples of how you talk, so rewrites sound like you. This is in-context learning, not fine-tuning, so it works the same for every provider and the comparison stays fair.
+- **Background:** your life context, so advice is personalised.
+
+Newest notes go first, up to the character budget. **From voice notes** turns notes into test cases, using your raw transcript as the input. A note used as a case is automatically left out of that case's voice profile, so the model can't copy it.
+
+**Library → Podcasts.** Search by podcast name, pick an episode, and:
+- **Get transcript:** used when the feed publishes one (`<podcast:transcript>`, e.g. Buzzsprout or Transistor shows). JSON, VTT, SRT and HTML transcripts are all supported.
+- **Transcribe with Gemini:** otherwise the app downloads the episode audio and has Gemini transcribe it as a speaker-labelled dialogue (Gemini Files API, `gemini-3.8-flash` by default). A 1-hour episode is roughly 100k input tokens and takes a few minutes.
+
+Rename generic speakers (`SPEAKER_00` → *Travis*) so summaries can attribute who said what. Then attach the
+episode to a case in the Podcast summary suite. To test hallucination, add a case with only the episode name and no transcript.
+
 ### Metrics reference
 
 - **Score (0–100)**: per output, the weighted mean of criterion scores, each normalised (1..N → 0..1; pass/fail → 0/1). *Final* uses your score where it exists and falls back to the AI judge.

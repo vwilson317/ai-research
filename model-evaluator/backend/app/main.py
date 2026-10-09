@@ -9,10 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, providers, runner, stats
+from . import db, library, podcasts, providers, runner, stats
 from .runner import new_id, now
-from .schemas import HumanScoresIn, JudgeConfig, ModelConfig, RunCreate, SettingsIn, Suite
-from .seed import seed_if_empty
+from .schemas import (FolderImportIn, HumanScoresIn, JudgeConfig, LibraryDocIn, ModelConfig, PodcastImportIn, RunCreate,
+                      SettingsIn, Suite)
+from .seed import seed_if_empty, seed_templates
 
 
 def load_dotenv() -> None:
@@ -34,6 +35,11 @@ load_dotenv()
 async def lifespan(_app: FastAPI):
     db.conn()
     seed_if_empty()
+    seed_templates()
+    for doc in db.all_docs("library"):
+        if doc.get("status") == "processing":
+            doc.update(status="error", error="Interrupted by a restart; import it again.")
+            library.save(doc)
     # Runs interrupted by a restart: mark them so the UI offers "resume".
     for run in db.all_docs("runs"):
         if run.get("status") in ("queued", "generating"):
@@ -63,16 +69,104 @@ def get_settings():
         val = providers.resolve_key(name)
         out[name] = {"set": bool(val), "source": "settings" if stored else ("env" if val else None),
                      "preview": f"…{val[-4:]}" if val else None}
-    return {"keys": out, "judge_models": ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "mock-judge"]}
+    return {"keys": out, "judge_models": ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "mock-judge"],
+            "voice_folder": db.get_setting("VOICE_FOLDER") or library.DEFAULT_VOICE_FOLDER,
+            "transcribe_model": db.get_setting("TRANSCRIBE_MODEL") or "gemini-3.8-flash"}
 
 
 @app.put("/api/settings")
 def put_settings(body: SettingsIn):
     for k, v in body.keys.items():
-        if not k.replace("_", "").isalnum():
+        if not k.replace("_", "").isalnum() or not k.isupper():
             raise HTTPException(400, f"Bad key name {k}")
         db.set_setting(k, v.strip() if v else None)
     return get_settings()
+
+
+# ---------------- personal library (voice notes, podcasts, documents) ----------------
+
+@app.get("/api/library")
+def list_library(kind: str | None = None):
+    docs = [d for d in db.all_docs("library") if not kind or d["kind"] == kind]
+    docs.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+    return [library.summary(d) for d in docs]
+
+
+@app.get("/api/library/{doc_id}")
+def get_doc(doc_id: str):
+    return db.get("library", doc_id) or _404("Document")
+
+
+@app.post("/api/library")
+def create_doc(body: LibraryDocIn):
+    extra = {"source": body.source}
+    if body.created_at:
+        extra["created_at"] = body.created_at
+    doc = library.make_doc(body.kind, body.title, body.text.strip(), **extra)
+    if body.kind == "podcast":
+        segs = library.parse_speaker_lines(body.text)
+        if any(s["speaker"] for s in segs):
+            doc["segments"] = segs
+    return library.summary(library.save(doc))
+
+
+@app.put("/api/library/{doc_id}")
+def update_doc(doc_id: str, body: LibraryDocIn):
+    doc = db.get("library", doc_id) or _404("Document")
+    doc.update(kind=body.kind, title=body.title, text=body.text)
+    if doc.get("segments"):
+        doc["segments"] = library.parse_speaker_lines(body.text)
+    return library.summary(library.save(doc))
+
+
+@app.post("/api/library/{doc_id}/speakers")
+def rename_speakers(doc_id: str, mapping: dict[str, str]):
+    """Rename diarized speakers, e.g. {"SPEAKER_00": "Travis"}."""
+    doc = db.get("library", doc_id) or _404("Document")
+    segs = [{**s, "speaker": (mapping.get(s["speaker"]) or s["speaker"]).strip() if s.get("speaker") else None}
+            for s in doc.get("segments") or []]
+    doc["segments"] = library.merge_segments(segs)
+    doc["text"] = library.segments_to_text(doc["segments"])
+    return library.save(doc)
+
+
+@app.delete("/api/library/{doc_id}")
+def delete_doc(doc_id: str):
+    db.delete("library", doc_id)
+    return {"ok": True}
+
+
+@app.post("/api/library/import-folder")
+def import_folder(body: FolderImportIn):
+    try:
+        return library.import_folder(body.path or db.get_setting("VOICE_FOLDER") or library.DEFAULT_VOICE_FOLDER)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/podcasts/search")
+async def podcast_search(q: str):
+    try:
+        return await podcasts.search(q)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Podcast search failed: {e}")
+
+
+@app.get("/api/podcasts/episodes")
+async def podcast_episodes(feed_url: str):
+    try:
+        return await podcasts.episodes(feed_url)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not read feed: {e}")
+
+
+@app.post("/api/podcasts/import")
+async def podcast_import(body: PodcastImportIn):
+    doc = library.make_doc("podcast", "Fetching episode…", status="processing",
+                           meta={"feed_url": body.feed_url, "guid": body.episode_guid, "step": "fetching feed"})
+    library.save(doc)
+    runner.spawn(doc["id"], podcasts.import_episode(doc["id"], body.feed_url, body.episode_guid, body.mode))
+    return library.summary(doc)
 
 
 # ---------------- models ----------------
@@ -166,7 +260,8 @@ def delete_suite(sid: str):
 
 def public_run(run: dict) -> dict:
     """Strip model identities unless the run has been revealed."""
-    out = {k: v for k, v in run.items() if k != "slots"}
+    out = {k: v for k, v in run.items() if k not in ("slots", "docs")}
+    out["doc_titles"] = {i: {"title": d["title"], "kind": d["kind"]} for i, d in (run.get("docs") or {}).items()}
     out["slots"] = [
         {"slot": s["slot"], **({"label": s["model"]["label"], "provider": s["model"]["provider"],
                                 "model": s["model"]["model"]} if run["revealed"] else {})}
@@ -291,6 +386,13 @@ def review(rid: str, include_ai: bool = False):
             rendered.append(item)
         out.append({"case_id": case_id, "sample": sample, "items": rendered})
     return {"units": out}
+
+
+@app.get("/api/runs/{rid}/docs/{doc_id}")
+def run_doc(rid: str, doc_id: str):
+    """The exact document snapshot a run used (survives later edits/deletes in the library)."""
+    run = db.get("runs", rid) or _404("Run")
+    return (run.get("docs") or {}).get(doc_id) or _404("Document")
 
 
 @app.post("/api/runs/{rid}/scores")

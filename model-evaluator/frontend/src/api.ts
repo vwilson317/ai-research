@@ -1,4 +1,6 @@
-import type { JudgeConfig, ModelConfig, ReviewUnit, Run, RunListItem, Settings, Stats, Suite } from './types';
+import type {
+  DocKind, Episode, JudgeConfig, LibraryDoc, LibraryDocSummary, ModelConfig, PodcastShow, ReviewUnit, Run, RunListItem, Settings, Stats, Suite,
+} from './types';
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -21,6 +23,18 @@ const json = (method: string, body?: unknown): RequestInit => ({ method, body: b
 export const api = {
   settings: () => req<Settings>('/settings'),
   saveKeys: (keys: Record<string, string | null>) => req<Settings>('/settings', json('PUT', { keys })),
+
+  library: (kind?: DocKind) => req<LibraryDocSummary[]>(`/library${kind ? `?kind=${kind}` : ''}`),
+  doc: (id: string) => req<LibraryDoc>(`/library/${id}`),
+  createDoc: (d: { kind: DocKind; title: string; text: string; source?: string; created_at?: string }) => req<LibraryDocSummary>('/library', json('POST', d)),
+  updateDoc: (id: string, d: { kind: DocKind; title: string; text: string }) => req<LibraryDocSummary>(`/library/${id}`, json('PUT', d)),
+  deleteDoc: (id: string) => req(`/library/${id}`, json('DELETE')),
+  renameSpeakers: (id: string, mapping: Record<string, string>) => req<LibraryDoc>(`/library/${id}/speakers`, json('POST', mapping)),
+  importFolder: (path: string) => req<{ added: number; updated: number; skipped: number; folder: string }>('/library/import-folder', json('POST', { path })),
+  searchPodcasts: (q: string) => req<PodcastShow[]>(`/podcasts/search?q=${encodeURIComponent(q)}`),
+  episodes: (feedUrl: string) => req<{ podcast: string; author: string; episodes: Episode[] }>(`/podcasts/episodes?feed_url=${encodeURIComponent(feedUrl)}`),
+  importEpisode: (feed_url: string, episode_guid: string, mode: 'auto' | 'feed' | 'transcribe') =>
+    req<LibraryDocSummary>('/podcasts/import', json('POST', { feed_url, episode_guid, mode })),
 
   models: () => req<ModelConfig[]>('/models'),
   createModel: (m: ModelConfig) => req<ModelConfig>('/models', json('POST', m)),
@@ -51,4 +65,5 @@ export const api = {
     req(`/runs/${id}/scores`, json('POST', { scores })),
   stats: (id: string) => req<Stats>(`/runs/${id}/stats`),
   exportUrl: (id: string) => `/api/runs/${id}/export`,
+  runDoc: (runId: string, docId: string) => req<LibraryDoc>(`/runs/${runId}/docs/${docId}`),
 };

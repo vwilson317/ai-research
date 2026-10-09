@@ -26,6 +26,18 @@ export const CRITERIA_PRESETS: Criterion[] = [
     rubric: '5: perfect fit\n3: acceptable\n1: off-putting or wrong register', scale_max: 5, weight: 0.5, graded_by: 'human' },
   { id: 'creativity', name: 'Creativity', description: 'Original, interesting, non-generic.',
     rubric: '5: surprising and apt\n3: competent but generic\n1: clichéd', scale_max: 5, weight: 1, graded_by: 'both' },
+  { id: 'voice', name: 'Sounds like me', description: "Tone, vocabulary, rhythm and personality match the user's own voice samples.",
+    rubric: '5: indistinguishable from me\n3: neutral, could be anyone\n1: corporate / AI-sounding', scale_max: 5, weight: 3, graded_by: 'both' },
+  { id: 'meaning', name: 'Meaning preserved', description: 'Nothing meaningful added, dropped or distorted.',
+    rubric: '5: nothing lost or added\n3: one point dropped or softened\n1: changes what I meant', scale_max: 5, weight: 2.5, graded_by: 'both' },
+  { id: 'empathy', name: 'I feel heard', description: 'Accurately reflects what was said and felt.',
+    rubric: '5: captures content and the feeling underneath\n3: generic validation\n1: misreads me', scale_max: 5, weight: 2, graded_by: 'both' },
+  { id: 'honest', name: 'Honest, not sycophantic', description: 'Willing to gently challenge; does not just agree.',
+    rubric: '5: kind and candid\n3: mostly agreeable\n1: flattering', scale_max: 5, weight: 1.5, graded_by: 'both' },
+  { id: 'personal', name: 'Personalised', description: 'Uses what it knows about me instead of generic advice.',
+    rubric: '5: clearly tailored\n3: somewhat\n1: could be sent to anyone', scale_max: 5, weight: 1.5, graded_by: 'both' },
+  { id: 'dialogue', name: 'Captures the dialogue', description: 'Who said what, agreements, pushback and how views shifted.',
+    rubric: '5: I can feel how the conversation unfolded\n3: speakers named but dynamic flattened\n1: reads like a monologue', scale_max: 5, weight: 2, graded_by: 'both' },
   { id: 'overall', name: 'Overall preference', description: 'Gut-level: how happy would you be with this answer?',
     rubric: '5: would use as-is\n3: needs edits\n1: would discard', scale_max: 5, weight: 1, graded_by: 'human' },
 ];
@@ -41,6 +53,8 @@ export const CHECK_TYPES: { type: CheckType; label: string; needsValue: boolean;
   { type: 'max_words', label: 'Max words', needsValue: true, hint: 'number' },
   { type: 'max_chars', label: 'Max characters', needsValue: true, hint: 'number' },
   { type: 'matches_reference', label: 'Contains the reference answer', needsValue: false },
+  { type: 'max_length_ratio', label: 'Max length vs input (×)', needsValue: true, hint: 'e.g. 0.8 = at least 20% shorter' },
+  { type: 'min_length_ratio', label: 'Min length vs input (×)', needsValue: true, hint: 'e.g. 0.3' },
 ];
 
 export const PROVIDERS = [

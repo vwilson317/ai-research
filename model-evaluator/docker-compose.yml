@@ -8,6 +8,8 @@ services:
         required: false
     volumes:
       - eval-data:/data
+      # Your iCloud voice-note transcripts (read-only). In the app, import from /voice-notes.
+      - ${VOICE_NOTES_DIR:-./voice-notes}:/voice-notes:ro
     restart: unless-stopped
 
 volumes:

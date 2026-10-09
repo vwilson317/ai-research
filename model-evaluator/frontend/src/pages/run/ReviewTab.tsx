@@ -1,8 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Sparkles, XCircle } from 'lucide-react';
 import { api } from '../../api';
-import type { Criterion, ReviewUnit, Run } from '../../types';
+import type { Criterion, LibraryDoc, ReviewUnit, Run } from '../../types';
 import { Badge, Button, Card, Empty, ErrorBox } from '../../components/ui';
+import { Dialogue } from '../../components/Dialogue';
+import { WordDiff } from '../../components/WordDiff';
+
+function AttachedDoc({ runId, docId, title }: { runId: string; docId: string; title: string }) {
+  const [open, setOpen] = useState(false);
+  const [doc, setDoc] = useState<LibraryDoc | null>(null);
+  useEffect(() => { if (open && !doc) api.runDoc(runId, docId).then(setDoc).catch(() => undefined); }, [open, doc, runId, docId]);
+  return (
+    <div className="rounded-md border border-zinc-200 dark:border-zinc-800">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs font-medium">
+        <span>📎 {title}</span><span className="text-indigo-600">{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open && doc && (
+        <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+          {doc.segments ? <Dialogue segments={doc.segments} maxHeight="24rem" /> : <div className="max-h-96 overflow-y-auto whitespace-pre-wrap text-sm">{doc.text}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ScoreButtons({ c, value, onPick }: { c: Criterion; value: number | undefined; onPick: (v: number) => void }) {
   const opts = c.scale_max === 1 ? [{ v: 0, l: 'Fail' }, { v: 1, l: 'Pass' }] : Array.from({ length: c.scale_max }, (_, i) => ({ v: i + 1, l: String(i + 1) }));
@@ -26,6 +46,7 @@ export default function ReviewTab({ run, onScored }: { run: Run; onScored: () =>
   const [err, setErr] = useState<string | null>(null);
   const [showRef, setShowRef] = useState(false);
   const [alwaysShowAi, setAlwaysShowAi] = useState(false);
+  const [showDiff, setShowDiff] = useState(run.suite.global_checks.some((c) => c.type.endsWith('length_ratio')));
 
   const humanCrit = run.suite.criteria.filter((c) => c.graded_by !== 'ai');
   const cases = useMemo(() => Object.fromEntries(run.suite.cases.map((c) => [c.id, c])), [run.suite.cases]);
@@ -91,7 +112,12 @@ export default function ReviewTab({ run, onScored }: { run: Run; onScored: () =>
             <Button variant="ghost" disabled={idx >= units.length - 1} onClick={() => setIdx(idx + 1)}><ChevronRight className="h-4 w-4" /></Button>
             <Button onClick={nextUnscored}>Next unscored</Button>
           </>}>
-          <div className="whitespace-pre-wrap text-sm">{tc?.input}</div>
+          <div className="max-h-72 overflow-y-auto whitespace-pre-wrap text-sm">{tc?.input}</div>
+          {(tc?.context_doc_ids?.length ?? 0) > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {tc!.context_doc_ids!.map((d) => <AttachedDoc key={d} runId={run.id} docId={d} title={run.doc_titles?.[d]?.title ?? d} />)}
+            </div>
+          )}
           {tc?.reference && (
             <div className="mt-3">
               <button className="text-xs text-indigo-600" onClick={() => setShowRef(!showRef)}>{showRef ? 'Hide' : 'Show'} reference answer</button>
@@ -102,7 +128,10 @@ export default function ReviewTab({ run, onScored }: { run: Run; onScored: () =>
 
         <div className="flex items-center justify-between text-xs text-zinc-500">
           <span>Order is shuffled per case. {done ? 'Case scored — AI judge scores shown.' : 'AI judge scores appear once you finish this case.'}</span>
-          <label className="flex items-center gap-1.5"><input type="checkbox" checked={alwaysShowAi} onChange={(e) => setAlwaysShowAi(e.target.checked)} /> Always show AI scores</label>
+          <span className="flex gap-3">
+            <label className="flex items-center gap-1.5"><input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} /> Show edits vs. input</label>
+            <label className="flex items-center gap-1.5"><input type="checkbox" checked={alwaysShowAi} onChange={(e) => setAlwaysShowAi(e.target.checked)} /> Always show AI scores</label>
+          </span>
         </div>
 
         <div className={`grid gap-3 ${cols}`}>
@@ -115,7 +144,9 @@ export default function ReviewTab({ run, onScored }: { run: Run; onScored: () =>
               actions={<span className="text-xs text-zinc-500">{it.latency_ms != null && `${(it.latency_ms / 1000).toFixed(1)}s`}{it.output_tokens ? ` · ${it.output_tokens} tok` : ''}</span>}>
               {it.status === 'pending' && <p className="text-sm text-zinc-500">Generating…</p>}
               {it.error && <ErrorBox error={it.error} />}
-              {it.output !== null && <div className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words text-sm">{it.output || <i className="text-zinc-400">(empty response)</i>}</div>}
+              {it.output !== null && (showDiff && it.output
+                ? <div className="max-h-96 overflow-y-auto break-words"><WordDiff before={tc?.input ?? ''} after={it.output} /></div>
+                : <div className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words text-sm">{it.output || <i className="text-zinc-400">(empty response)</i>}</div>)}
 
               {it.checks.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1">

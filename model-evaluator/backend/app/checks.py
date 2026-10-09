@@ -15,7 +15,7 @@ def _strip_fences(text: str) -> str:
     return m.group(1) if m else text
 
 
-def run_check(check: AutoCheck, output: str, reference: str | None) -> dict:
+def run_check(check: AutoCheck, output: str, reference: str | None, input_text: str = "") -> dict:
     v = check.value or ""
     cs = check.case_sensitive
     words = len(output.split())
@@ -40,6 +40,10 @@ def run_check(check: AutoCheck, output: str, reference: str | None) -> dict:
                 ok = words <= int(v)
             case "max_chars":
                 ok = len(output) <= int(v)
+            case "max_length_ratio":
+                ok = words <= float(v) * max(1, len(input_text.split()))
+            case "min_length_ratio":
+                ok = words >= float(v) * max(1, len(input_text.split()))
             case "matches_reference":
                 ok = bool(reference) and _norm(reference, cs) in _norm(output, cs)
             case _:
@@ -49,9 +53,13 @@ def run_check(check: AutoCheck, output: str, reference: str | None) -> dict:
         ok, detail = False, f"invalid JSON: {e.msg}"
     except (ValueError, re.error) as e:
         ok, detail = False, f"check error: {e}"
+    if check.type in ("max_length_ratio", "min_length_ratio"):
+        ratio = words / max(1, len(input_text.split()))
+        label = f"{'≤' if check.type.startswith('max') else '≥'}{v}× input length (got {ratio:.2f}×)"
+        return {"check": label, "passed": ok, "detail": detail}
     label = f"{check.type}" + (f" '{v}'" if v and check.type not in ("json_valid", "matches_reference") else "")
     return {"check": label, "passed": ok, "detail": detail}
 
 
-def run_checks(checks: list[AutoCheck], output: str, reference: str | None) -> list[dict]:
-    return [run_check(c, output, reference) for c in checks]
+def run_checks(checks: list[AutoCheck], output: str, reference: str | None, input_text: str = "") -> list[dict]:
+    return [run_check(c, output, reference, input_text) for c in checks]

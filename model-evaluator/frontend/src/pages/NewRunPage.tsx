@@ -74,6 +74,8 @@ export default function NewRunPage() {
           <div className="mt-2 flex flex-wrap gap-1">
             {suite.criteria.map((c) => <Badge key={c.id} title={c.description}>{c.name} ×{c.weight}</Badge>)}
             {suite.criteria.length === 0 && <Badge color="red">Suite has no criteria — add some first</Badge>}
+            {(suite.context?.doc_ids.length ?? 0) > 0 && <Badge color="indigo">{suite.context!.role === 'voice' ? 'voice profile' : 'personal background'}: {suite.context!.doc_ids.length} notes</Badge>}
+            {suite.cases.some((c) => c.context_doc_ids?.length) && <Badge color="indigo">{suite.cases.filter((c) => c.context_doc_ids?.length).length} cases with attached transcripts</Badge>}
           </div>
         )}
       </Card>

@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from . import db, judge, providers, stats
+from . import db, judge, library, prompting, providers, stats
 from .checks import run_checks
 from .providers import ProviderError
 from .schemas import AutoCheck, RunCreate
@@ -60,11 +60,16 @@ def create_run(req: RunCreate) -> dict:
     random.SystemRandom().shuffle(shuffled)
     letters = string.ascii_uppercase
     slots = [{"slot": letters[i], "model": m} for i, m in enumerate(shuffled)]
+    doc_ids = list((suite.get("context") or {}).get("doc_ids", []))
+    for c in suite["cases"]:
+        doc_ids += c.get("context_doc_ids") or []
+    docs = library.resolve(list(dict.fromkeys(doc_ids)))
     run = {
         "id": new_id("run"),
         "name": req.name or f"{suite['name']} · {datetime.now().strftime('%b %d %H:%M')}",
         "created_at": now(),
         "suite": suite,
+        "docs": docs,
         "slots": slots,
         "samples_per_case": req.samples_per_case,
         "concurrency": req.concurrency,
@@ -104,11 +109,11 @@ async def execute_run(run_id: str, retry_errors: bool = False) -> None:
         async with sem:
             m = slot_models[gen["slot"]]
             case = cases[gen["case_id"]]
-            system = "\n\n".join(p for p in [suite.get("system_prompt"), m.get("system_prompt")] if p) or None
+            system = prompting.system_prompt(run, case, m)
             t0 = time.perf_counter()
             try:
                 comp = await providers.complete(
-                    provider=m["provider"], model=m["model"], prompt=case["input"], system=system,
+                    provider=m["provider"], model=m["model"], prompt=prompting.user_prompt(run, case), system=system,
                     temperature=m.get("temperature"), max_tokens=m.get("max_tokens", 2048), top_p=m.get("top_p"),
                     base_url=m.get("base_url"), api_key=providers.key_for(m["provider"], m.get("api_key_env")),
                 )
@@ -119,7 +124,7 @@ async def execute_run(run_id: str, retry_errors: bool = False) -> None:
                     input_tokens=comp.input_tokens, output_tokens=comp.output_tokens,
                     cost_usd=(comp.input_tokens * m.get("price_input_per_mtok", 0)
                               + comp.output_tokens * m.get("price_output_per_mtok", 0)) / 1e6,
-                    checks=run_checks(checks, comp.text, case.get("reference")),
+                    checks=run_checks(checks, comp.text, case.get("reference"), case["input"]),
                 )
             except Exception as e:  # noqa: BLE001 - record any provider failure on the generation
                 gen.update(status="error", error=str(e)[:1000], latency_ms=round((time.perf_counter() - t0) * 1000))
@@ -165,7 +170,7 @@ async def run_judge(run_id: str) -> None:
 
     async def individual(gen: dict):
         async with sem:
-            prompt = judge.build_individual_prompt(suite, cases[gen["case_id"]], ai_criteria, gen["output"] or "",
+            prompt = judge.build_individual_prompt(run, cases[gen["case_id"]], ai_criteria, gen["output"] or "",
                                                    cfg.get("include_reference", True))
             try:
                 data, comp = await judge.call_judge(cfg, prompt)
@@ -180,7 +185,7 @@ async def run_judge(run_id: str) -> None:
             random.Random(f"{run['seed']}-judge-{unit[0]['case_id']}-{unit[0]['sample']}").shuffle(order)
             labelled = {f"Response {i + 1}": g for i, g in enumerate(order)}
             prompt = judge.build_comparative_prompt(
-                suite, cases[unit[0]["case_id"]], ai_criteria,
+                run, cases[unit[0]["case_id"]], ai_criteria,
                 [(lab, g["output"] or "") for lab, g in labelled.items()], cfg.get("include_reference", True))
             try:
                 data, comp = await judge.call_judge(cfg, prompt)

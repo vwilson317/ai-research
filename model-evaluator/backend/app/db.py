@@ -15,6 +15,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS models (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS suites (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS library (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS generations (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_gen_run ON generations(run_id);
 CREATE TABLE IF NOT EXISTS scores (
@@ -26,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_scores_run ON scores(run_id);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
-DOC_TABLES = {"models", "suites", "runs"}
+DOC_TABLES = {"models", "suites", "runs", "library"}
 
 
 def conn() -> sqlite3.Connection:

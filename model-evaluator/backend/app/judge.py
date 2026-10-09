@@ -4,7 +4,7 @@ import json
 import random
 import re
 
-from . import providers
+from . import prompting, providers
 from .providers import ProviderError
 
 JUDGE_SYSTEM = """You are a meticulous, impartial evaluator of AI model responses.
@@ -31,18 +31,27 @@ def criteria_block(criteria: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _task_block(suite: dict, case: dict, include_reference: bool) -> str:
+def _task_block(run: dict, case: dict, include_reference: bool) -> str:
+    suite = run["suite"]
     parts = []
     if suite.get("system_prompt"):
         parts.append(f"<system_prompt_given_to_model>\n{suite['system_prompt']}\n</system_prompt_given_to_model>")
+    if (suite.get("context") or {}).get("share_with_judge", True):
+        ctx = prompting.context_block(run, case)
+        if ctx:
+            parts.append("The model was given this personal context about the user. Use it to judge voice/tone match "
+                         f"and personalisation.\n<personal_context>\n{ctx}\n</personal_context>")
+    docs = prompting.case_documents(run, case)
+    if docs:
+        parts.append(f"<source_material_given_to_model>\n{docs}\n</source_material_given_to_model>")
     parts.append(f"<task>\n{case['input']}\n</task>")
     if include_reference and case.get("reference"):
         parts.append(f"<reference_answer>\n{case['reference']}\n</reference_answer>")
     return "\n\n".join(parts)
 
 
-def build_individual_prompt(suite: dict, case: dict, criteria: list[dict], output: str, include_reference: bool) -> str:
-    return f"""{_task_block(suite, case, include_reference)}
+def build_individual_prompt(run: dict, case: dict, criteria: list[dict], output: str, include_reference: bool) -> str:
+    return f"""{_task_block(run, case, include_reference)}
 
 <response>
 {output}
@@ -55,10 +64,10 @@ Return JSON: {{"scores": [{{"criterion_id": "<id>", "score": <number>, "rational
 Include every criterion id exactly once."""
 
 
-def build_comparative_prompt(suite: dict, case: dict, criteria: list[dict], labelled: list[tuple[str, str]],
+def build_comparative_prompt(run: dict, case: dict, criteria: list[dict], labelled: list[tuple[str, str]],
                              include_reference: bool) -> str:
     responses = "\n\n".join(f'<response label="{label}">\n{text}\n</response>' for label, text in labelled)
-    return f"""{_task_block(suite, case, include_reference)}
+    return f"""{_task_block(run, case, include_reference)}
 
 Several anonymous responses to the same task follow, in random order. Grade each one on its own merits
 against the criteria, but use the comparison to calibrate your scores consistently.

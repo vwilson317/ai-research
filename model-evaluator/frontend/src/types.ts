@@ -17,11 +17,17 @@ export interface ModelConfig {
 
 export type CheckType =
   | 'contains' | 'not_contains' | 'regex' | 'exact' | 'starts_with'
-  | 'json_valid' | 'min_words' | 'max_words' | 'max_chars' | 'matches_reference';
+  | 'json_valid' | 'min_words' | 'max_words' | 'max_chars' | 'matches_reference'
+  | 'max_length_ratio' | 'min_length_ratio';
 
 export interface AutoCheck { type: CheckType; value?: string | null; case_sensitive?: boolean }
 
-export interface TestCase { id: string; input: string; reference?: string | null; tags: string[]; checks: AutoCheck[] }
+export interface TestCase {
+  id: string; input: string; reference?: string | null; tags: string[]; checks: AutoCheck[];
+  context_doc_ids?: string[]; source_doc_id?: string | null;
+}
+
+export interface SuiteContext { doc_ids: string[]; role: 'voice' | 'background'; max_chars: number; share_with_judge: boolean }
 
 export interface Criterion {
   id: string; name: string; description: string; rubric: string;
@@ -30,7 +36,7 @@ export interface Criterion {
 
 export interface Suite {
   id?: string; name: string; description: string; system_prompt: string;
-  cases: TestCase[]; criteria: Criterion[]; global_checks: AutoCheck[];
+  cases: TestCase[]; criteria: Criterion[]; global_checks: AutoCheck[]; context?: SuiteContext;
 }
 
 export interface JudgeConfig {
@@ -55,6 +61,7 @@ export interface Run {
   judge: JudgeConfig; status: string; revealed: boolean; busy: boolean;
   judge_status: string; judge_errors: string[]; error_count?: number;
   meta_review: MetaReview | null; meta_status: string; meta_error?: string | null;
+  doc_titles?: Record<string, { title: string; kind: DocKind }>;
 }
 
 export interface RunListItem extends Omit<Run, 'suite'> { suite: { id: string; name: string; cases: number } }
@@ -100,4 +107,19 @@ export interface Stats {
 }
 
 export interface KeyStatus { set: boolean; source: 'settings' | 'env' | null; preview: string | null }
-export interface Settings { keys: Record<string, KeyStatus>; judge_models: string[] }
+export interface Settings { keys: Record<string, KeyStatus>; judge_models: string[]; voice_folder: string; transcribe_model: string }
+
+export type DocKind = 'voice_note' | 'podcast' | 'document';
+export interface Segment { speaker: string | null; text: string; start?: number | null }
+export interface LibraryDocSummary {
+  id: string; kind: DocKind; title: string; source: string | null; status: 'ready' | 'processing' | 'error';
+  error: string | null; created_at: string; word_count: number; preview: string; has_segments: boolean;
+  speakers: string[]; meta: Record<string, unknown>;
+}
+export interface LibraryDoc extends Omit<LibraryDocSummary, 'preview' | 'has_segments' | 'speakers'> { text: string; segments: Segment[] | null }
+
+export interface PodcastShow { name: string; author: string; feed_url: string; artwork: string; episodes: number; genre: string }
+export interface Episode {
+  guid: string; title: string; published: string | null; duration: string | null; audio_url: string | null;
+  description: string; transcripts: { url: string; type: string }[];
+}

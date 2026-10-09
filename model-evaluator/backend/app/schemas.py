@@ -24,6 +24,7 @@ class ModelConfig(BaseModel):
 CheckType = Literal[
     "contains", "not_contains", "regex", "exact", "starts_with",
     "json_valid", "min_words", "max_words", "max_chars", "matches_reference",
+    "max_length_ratio", "min_length_ratio",
 ]
 
 
@@ -39,6 +40,8 @@ class TestCase(BaseModel):
     reference: str | None = Field(None, description="Ideal answer / grading notes, shown to graders")
     tags: list[str] = []
     checks: list[AutoCheck] = []
+    context_doc_ids: list[str] = Field([], description="Library docs (e.g. a podcast transcript) attached to this case's prompt")
+    source_doc_id: str | None = Field(None, description="Library doc this case's input came from (excluded from the voice profile)")
 
 
 class Criterion(BaseModel):
@@ -51,6 +54,13 @@ class Criterion(BaseModel):
     graded_by: Literal["human", "ai", "both"] = "both"
 
 
+class SuiteContext(BaseModel):
+    doc_ids: list[str] = Field([], description="Library docs given to every model as personal context")
+    role: Literal["voice", "background"] = "voice"
+    max_chars: int = Field(24000, ge=500, le=400000)
+    share_with_judge: bool = True
+
+
 class Suite(BaseModel):
     id: str | None = None
     name: str
@@ -59,6 +69,7 @@ class Suite(BaseModel):
     cases: list[TestCase] = []
     criteria: list[Criterion] = []
     global_checks: list[AutoCheck] = []
+    context: SuiteContext = SuiteContext()
 
 
 class JudgeConfig(BaseModel):
@@ -93,3 +104,21 @@ class HumanScoresIn(BaseModel):
 
 class SettingsIn(BaseModel):
     keys: dict[str, str | None]
+
+
+class LibraryDocIn(BaseModel):
+    kind: Literal["voice_note", "podcast", "document"] = "document"
+    title: str
+    text: str
+    source: str | None = None
+    created_at: str | None = None
+
+
+class FolderImportIn(BaseModel):
+    path: str | None = None
+
+
+class PodcastImportIn(BaseModel):
+    feed_url: str
+    episode_guid: str
+    mode: Literal["auto", "feed", "transcribe"] = "auto"
