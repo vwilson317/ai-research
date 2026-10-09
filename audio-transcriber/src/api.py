@@ -2,7 +2,7 @@
 FastAPI application for Audio Transcription Cloud Service.
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -11,6 +11,13 @@ import logging
 import uuid
 from datetime import datetime
 import json
+import tempfile
+from pathlib import Path
+import asyncio
+from threading import Thread
+
+# Import our transcription service
+from transcriber import Transcriber
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,6 +39,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize transcription service
+transcription_config = {
+    'transcription': {
+        'model_size': 'base',  # Options: tiny, base, small, medium, large
+        'language': 'auto',
+        'include_timestamps': False,
+        'output_format': 'txt',
+        'task': 'transcribe'
+    }
+}
+
+transcriber = Transcriber(transcription_config)
+
 # Pydantic models for request/response
 class TranscriptionOptions(BaseModel):
     language: Optional[str] = None
@@ -48,6 +68,54 @@ class TranscriptUpdate(BaseModel):
 # In-memory storage (replace with database in production)
 files_db = {}
 jobs_db = {}
+
+# Background task to process transcription
+def process_transcription_job(job_id: str, file_path: Path, options: dict = None):
+    """Background task to process transcription job."""
+    try:
+        logger.info(f"Starting transcription job: {job_id}")
+        
+        # Update job status to processing
+        if job_id in jobs_db:
+            jobs_db[job_id]['status'] = 'processing'
+            jobs_db[job_id]['progress'] = 10
+        
+        # Apply custom options if provided
+        if options:
+            if options.get('language'):
+                transcriber.language = options['language']
+            if options.get('include_timestamps'):
+                transcriber.include_timestamps = options['include_timestamps']
+        
+        # Perform transcription
+        transcription_result = transcriber.transcribe_audio(file_path)
+        
+        if transcription_result:
+            # Update job with results
+            if job_id in jobs_db:
+                jobs_db[job_id]['status'] = 'completed'
+                jobs_db[job_id]['progress'] = 100
+                jobs_db[job_id]['transcript'] = transcription_result['text']
+                jobs_db[job_id]['completed_at'] = datetime.now().isoformat()
+                jobs_db[job_id]['language'] = transcription_result.get('language', 'unknown')
+                jobs_db[job_id]['metadata'] = transcription_result.get('metadata', {})
+            
+            logger.info(f"Transcription completed: {job_id}")
+        else:
+            # Handle transcription failure
+            if job_id in jobs_db:
+                jobs_db[job_id]['status'] = 'error'
+                jobs_db[job_id]['error'] = 'Transcription failed'
+                jobs_db[job_id]['completed_at'] = datetime.now().isoformat()
+            
+            logger.error(f"Transcription failed: {job_id}")
+            
+    except Exception as e:
+        logger.error(f"Error in transcription job {job_id}: {e}")
+        if job_id in jobs_db:
+            jobs_db[job_id]['status'] = 'error'
+            jobs_db[job_id]['error'] = str(e)
+            jobs_db[job_id]['completed_at'] = datetime.now().isoformat()
 
 @app.get("/")
 async def root():
@@ -66,7 +134,8 @@ async def health_check():
     return {
         "status": "healthy",
         "database": "connected",  # TODO: Add actual DB check
-        "storage": "connected"     # TODO: Add actual S3/MinIO check
+        "storage": "connected",     # TODO: Add actual S3/MinIO check
+        "transcriber": "ready" if transcriber.model else "not_ready"
     }
 
 @app.get("/api/status")
@@ -77,7 +146,8 @@ async def get_status():
         "environment": os.getenv("ENVIRONMENT", "development"),
         "database_url": os.getenv("DATABASE_URL", "not configured"),
         "minio_endpoint": os.getenv("MINIO_ENDPOINT", "not configured"),
-        "minio_bucket": os.getenv("MINIO_BUCKET", "not configured")
+        "minio_bucket": os.getenv("MINIO_BUCKET", "not configured"),
+        "transcriber_model": transcriber.model_size if transcriber.model else "not_loaded"
     }
 
 @app.post("/api/test")
@@ -100,25 +170,35 @@ async def upload_file(file: UploadFile = File(...)):
         # Generate unique file ID
         file_id = str(uuid.uuid4())
         
+        # Create temporary file
+        temp_dir = Path(tempfile.gettempdir()) / "audio_transcriber"
+        temp_dir.mkdir(exist_ok=True)
+        
+        file_path = temp_dir / f"{file_id}_{file.filename}"
+        
+        # Save uploaded file
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
         # Store file metadata
         files_db[file_id] = {
             "id": file_id,
             "name": file.filename,
-            "size": 0,  # TODO: Get actual file size
+            "size": len(content),
             "content_type": file.content_type,
             "uploaded_at": datetime.now().isoformat(),
-            "status": "uploaded"
+            "status": "uploaded",
+            "file_path": str(file_path)
         }
         
-        # TODO: Save file to storage (S3/MinIO)
-        # For now, just return success
         logger.info(f"File uploaded: {file.filename} (ID: {file_id})")
         
         return {
             "file_id": file_id,
             "upload_url": f"/api/files/{file_id}",
             "file_name": file.filename,
-            "file_size": 0  # TODO: Get actual size
+            "file_size": len(content)
         }
         
     except Exception as e:
@@ -127,7 +207,7 @@ async def upload_file(file: UploadFile = File(...)):
 
 # Start transcription endpoint
 @app.post("/api/transcribe")
-async def start_transcription(request: TranscriptionRequest):
+async def start_transcription(request: TranscriptionRequest, background_tasks: BackgroundTasks):
     """Start transcription for an uploaded file."""
     try:
         # Validate file exists
@@ -136,6 +216,9 @@ async def start_transcription(request: TranscriptionRequest):
         
         # Generate job ID
         job_id = str(uuid.uuid4())
+        
+        # Get file path
+        file_path = Path(files_db[request.file_id]["file_path"])
         
         # Create job record
         jobs_db[job_id] = {
@@ -149,8 +232,10 @@ async def start_transcription(request: TranscriptionRequest):
             "options": request.options.dict() if request.options else {}
         }
         
-        # TODO: Start actual transcription process
-        # For now, simulate processing
+        # Start background transcription task
+        options = request.options.dict() if request.options else {}
+        background_tasks.add_task(process_transcription_job, job_id, file_path, options)
+        
         logger.info(f"Transcription started: {job_id}")
         
         return {"job_id": job_id}
@@ -168,13 +253,6 @@ async def get_job_status(job_id: str):
             raise HTTPException(status_code=404, detail="Job not found")
         
         job = jobs_db[job_id]
-        
-        # TODO: Get real status from transcription service
-        # For now, simulate progress
-        if job["status"] == "pending":
-            job["status"] = "processing"
-            job["progress"] = 50
-        
         return job
         
     except Exception as e:
@@ -219,7 +297,15 @@ async def delete_job(job_id: str):
         if job_id not in jobs_db:
             raise HTTPException(status_code=404, detail="Job not found")
         
-        # TODO: Delete associated files from storage
+        # Get file path to delete
+        file_id = jobs_db[job_id]["file_id"]
+        if file_id in files_db:
+            file_path = Path(files_db[file_id]["file_path"])
+            if file_path.exists():
+                file_path.unlink()  # Delete the file
+            del files_db[file_id]
+        
+        # Delete job record
         del jobs_db[job_id]
         
         return {"success": True}
