@@ -1,41 +1,64 @@
 # Model Evaluator
 
-A personal tool for comparing LLMs side by side. You write the eval (test cases, scoring criteria,
-automatic checks), run it across any number of models, grade the outputs **blind**, and only then
-reveal which model was which. A Gemini-powered AI judge grades the same outputs independently, and
-can also **audit the eval itself**.
+A personal tool for comparing LLMs side by side, deployable to **Netlify**. You write the eval (test cases, scoring criteria,
+automatic checks), run it across any number of models, grade the outputs **blind**, and only then reveal which model was which.
+A Gemini-powered AI judge grades the same outputs independently, and can also **audit the eval itself**.
 
-![flow](https://img.shields.io/badge/flow-define%20→%20run%20→%20blind%20grade%20→%20AI%20judge%20→%20reveal%20→%20audit-indigo)
+## Deploy to Netlify
 
-## Quick start
+1. **Create the site.** In Netlify, go to *Add new project → Import an existing project*, pick this GitHub repo, and set
+   **Base directory = `model-evaluator`**. The build command, publish directory and functions are read from `netlify.toml`.
+2. **Add a database.** In the project, open the *Database* (Netlify DB, powered by Neon) section and create one. This sets
+   `NETLIFY_DATABASE_URL` for your functions. *Alternative:* create a free Neon project and set `DATABASE_URL` yourself.
+   Tables are created automatically on first request.
+3. **Set environment variables** (*Site configuration → Environment variables*):
+   - `APP_PASSWORD`: **required.** The app refuses to serve data without it.
+   - `GEMINI_API_KEY`: needed for the AI judge, podcast transcription and voice style guides.
+   - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`: whichever providers you use. You can also paste keys on
+     the app's *API keys* page, where they're stored AES-encrypted in the database.
+   - `APP_SECRET`: optional. A separate secret for session signing and key encryption (defaults to `APP_PASSWORD`).
+4. **Deploy**, open the site, and log in.
 
-```bash
-cp .env.example .env          # add GEMINI_API_KEY (needed for the AI judge) + any provider keys
-docker compose up --build     # → http://localhost:8000
-```
+### How it runs on Netlify
 
-Or without Docker (Python 3.11+, Node 20+):
-
-```bash
-make install
-make dev                      # API on :8000, UI on http://localhost:5173
-```
-
-It works offline out of the box: the starter data includes three **mock** models and a `mock-judge`.
-Use them to try the whole flow without spending any tokens.
-
-## How it works
-
-| Step | What happens |
+| Piece | Where |
 |---|---|
-| **1. Models** | Add contestants: Gemini, Anthropic, OpenAI, or any OpenAI-compatible endpoint (OpenRouter, Ollama, Groq…). Each entry is a model *plus* settings (temperature, top-p, max tokens, extra system prompt, $/M-token pricing), so you can compare one model at two temperatures, for example. A ⚡ button sends a test request. |
-| **2. Eval suite** | Test cases (prompt, optional reference answer, tags, per-case automatic checks), scoring criteria (1–N scale or pass/fail, weight, rubric, graded by human / AI / both), and global checks. Add criteria from a built-in library (correctness, faithfulness, hallucination, instruction following, reasoning, code quality, safety, tone…). Bulk-paste cases, or import/export JSON. |
-| **3. Run** | Choose the suite, the **number of models** (1–8) and which ones, samples per case (for consistency/variance), parallelism, blinding mode and AI-judge settings. Models are shuffled onto anonymous labels (Model A, B, C…). |
-| **4. Blind review** | Responses for each case appear side by side in shuffled order. You score each criterion. Automatic-check results, latency and token counts are shown; model names are not. AI-judge scores stay hidden until you've finished that case, so they can't anchor you. *Strict* blinding relabels responses per case ("Response 1/2/3"), so you can't follow a model's style from case to case. |
-| **5. AI judge** | Gemini (`gemini-3.8-flash` by default, configurable) grades every output against the same rubric, without seeing model names. **Individual** mode grades each output alone (least position bias). **Comparative** mode shows the judge all responses for a case at once, in shuffled order (better relative calibration). |
-| **6. Results** | Leaderboard: final / human / AI score (weighted, 0–100), pairwise win rate, auto-check pass rate, latency avg + p95, output length, cost, score σ across samples, and errors. Charts of human vs AI scores, overall and per criterion. A case × model heat table sorted by *spread* shows cases that don't separate the models. |
-| **7. Reveal** | Unblinds the leaderboard and review screens. You can re-blind afterwards. |
-| **8. AI audit of the eval** | The judge reviews the suite design plus the anonymised results and your disagreements with it. It reports a quality score, issues by severity, vague rubrics (with suggested rewrites), cases that don't discriminate, judge-reliability notes, and suggested new test cases that you can add to the suite in one click. |
+| React UI | static files in `dist/` |
+| REST API | `netlify/functions/api.mts`, mounted at `/api/*` (30 s per request) |
+| Eval generation, AI judging, meta-review, podcast transcription, style guides | `netlify/functions/worker-background.mts`, a **background function** (15 min per invocation). Long jobs stop at ~12 minutes and re-queue themselves, so runs of any size finish. If an invocation dies, the run shows *interrupted* and **Resume** picks up where it stopped. |
+| Data | Postgres (Netlify DB / Neon) through `server/db.ts`; locally an embedded Postgres (PGlite) in `.data/` |
+| Login | one password → signed, httpOnly session cookie (30 days) |
+
+Cost: background functions bill as compute (credits per GB-hour), and they mostly wait on model APIs, so a typical personal
+eval uses a fraction of a credit. Your real cost is the model tokens.
+
+## Local development
+
+```bash
+npm install
+cp .env.example .env     # add keys; leave APP_PASSWORD empty to skip login locally
+npm run dev              # http://localhost:8888 (UI + API, jobs run in-process, data in .data/)
+npm test                 # 30 tests: blind flow, judge, auth, budgeted job continuation, parsers, podcasts, providers
+```
+
+`netlify dev` also works if you have the Netlify CLI. The app works offline out of the box: three **mock** models and a
+`mock-judge` are pre-loaded, so you can try every flow without spending tokens.
+
+## Your iCloud voice notes (refresh once or twice a year)
+
+There's no iCloud API to sync from a server, and you don't need one. The voice profile changes slowly, so the routine is:
+
+1. Your existing `audio-transcriber` keeps writing transcripts to **iCloud Drive → Transcripts** on your Mac.
+2. Every six months or so, open **Library → Voice notes → Choose folder…** and select that folder (in Finder it's under *iCloud Drive*).
+   Your browser reads the `.txt / .json / .srt / .md` files and uploads only the text, in batches. New and edited notes
+   are added and unchanged ones are skipped, so re-syncing is safe.
+3. Optionally click **Distil a voice style guide**. Gemini reads all the selected notes (up to ~150k tokens) and writes a
+   dated guide: tone, signature phrases, rhythm, what you'd never say, and 10–15 verbatim excerpts. Put that guide (plus a
+   handful of recent raw notes) in a suite's **Personal context** instead of hundreds of notes. Every request is then cheaper,
+   it fits smaller-context models, and each refresh gives you a new dated version you can A/B against the last one.
+
+Voice profiles are given to models as context, not used for fine-tuning, so every provider gets the same information and the
+comparison stays fair.
 
 ## Built-in eval templates
 
@@ -48,25 +71,26 @@ Use them to try the whole flow without spending any tokens.
 The rewrite review screen has a **Show edits vs. input** toggle: a word-level diff with the share of your words that were kept.
 Podcast cases show the attached transcript as a speaker-by-speaker conversation.
 
-## Personal library
-
-**Library → Voice notes.** Point it at the folder your `audio-transcriber` writes to
-(default `~/Library/Mobile Documents/com~apple~CloudDocs/Transcripts`). It imports every `.txt / .json / .srt / .md`
-transcript; re-import any time and only new or changed notes are added. You can also upload or paste notes.
-In Docker, set `VOICE_NOTES_DIR` in `.env` and import from `/voice-notes`.
-
-**Suite → Personal context.** Pick voice notes to give every model (and the judge):
-- **Voice profile:** samples of how you talk, so rewrites sound like you. This is in-context learning, not fine-tuning, so it works the same for every provider and the comparison stays fair.
-- **Background:** your life context, so advice is personalised.
-
-Newest notes go first, up to the character budget. **From voice notes** turns notes into test cases, using your raw transcript as the input. A note used as a case is automatically left out of that case's voice profile, so the model can't copy it.
-
 **Library → Podcasts.** Search by podcast name, pick an episode, and:
-- **Get transcript:** used when the feed publishes one (`<podcast:transcript>`, e.g. Buzzsprout or Transistor shows). JSON, VTT, SRT and HTML transcripts are all supported.
-- **Transcribe with Gemini:** otherwise the app downloads the episode audio and has Gemini transcribe it as a speaker-labelled dialogue (Gemini Files API, `gemini-3.8-flash` by default). A 1-hour episode is roughly 100k input tokens and takes a few minutes.
+- **Get transcript:** used when the feed publishes one (`<podcast:transcript>`). JSON, VTT, SRT and HTML transcripts are all supported.
+- **Transcribe with Gemini:** otherwise the background worker downloads the audio (up to 400 MB) and Gemini transcribes it as a
+  speaker-labelled dialogue (Files API, `gemini-3.8-flash` by default).
 
-Rename generic speakers (`SPEAKER_00` → *Travis*) so summaries can attribute who said what. Then attach the
-episode to a case in the Podcast summary suite. To test hallucination, add a case with only the episode name and no transcript.
+Rename generic speakers (`SPEAKER_00` → a real name) so summaries can say who said what, then attach the episode to a case
+in the *Podcast summary* suite.
+
+## How an evaluation works
+
+| Step | What happens |
+|---|---|
+| **1. Models** | Gemini, Anthropic, OpenAI or any OpenAI-compatible endpoint (OpenRouter, Groq, Together…), plus offline mocks. Each entry is a model *plus* settings and $/M-token pricing. |
+| **2. Eval suite** | Test cases (prompt, reference answer, tags, checks, attached transcripts), weighted criteria with rubrics graded by human / AI / both, global checks, and personal context. Import/export JSON. |
+| **3. Run** | Pick the suite, how many models (1–8) and which, samples per case, parallelism, blinding mode and judge settings. Models are shuffled onto anonymous labels. |
+| **4. Blind review** | Shuffled side-by-side outputs. You score them, and AI scores stay hidden until you finish each case. The rewrite review shows a word-level diff against your original; podcast cases show the transcript as a dialogue. |
+| **5. AI judge** | Gemini grades blind, either individually (least position bias) or comparatively. |
+| **6. Results** | Leaderboard (final/human/AI, win rate, checks, latency, length, cost, consistency), human↔AI agreement, length bias, and per-case discrimination. |
+| **7. Reveal** | Unblind, or re-blind. |
+| **8. AI audit** | Gemini critiques the eval's design and your disagreements, and suggests new cases you can add in one click. |
 
 ### Metrics reference
 
@@ -80,16 +104,8 @@ episode to a case in the Podcast summary suite. To test hallucination, add a cas
 ## Layout
 
 ```
-backend/   FastAPI + SQLite (app/providers.py, judge.py, runner.py, stats.py, checks.py)
-frontend/  React + Vite + TypeScript + Tailwind
-```
-
-The data lives in `backend/data/evaluator.db` (in Docker, the `eval-data` volume). API keys pasted in the UI
-are stored in that local database. Environment variables / `.env` work as well. `GET /api/runs/{id}/export`
-dumps a run's outputs, scores and stats as JSON. Interactive API docs are at `/docs`.
-
-## Tests
-
-```bash
-make test   # backend: full blind flow with mock models + judge, provider request shapes; frontend: typecheck
+src/                  React UI (Vite + TypeScript + Tailwind)
+server/               API + jobs (shared by Netlify functions and the local dev server)
+netlify/functions/    api.mts (/api/*), worker-background.mts
+tests/                vitest
 ```
